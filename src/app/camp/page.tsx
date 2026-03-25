@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getTeams, getHackathons, addTeam } from "@/lib/storage";
+import { supabase } from "@/lib/supabase";
+import { signInWithGoogle } from "@/lib/auth";
+import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 import type { Team, Hackathon } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
-import { Users, ExternalLink, Plus, X } from "lucide-react";
+import { Users, ExternalLink, Plus, X, LogIn } from "lucide-react";
 import { Suspense } from "react";
 
 function CampContent() {
@@ -19,10 +22,33 @@ function CampContent() {
   const [roleFilter, setRoleFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", intro: "", lookingFor: "", contactUrl: "", hackathonSlug: hackathonFilter !== "all" ? hackathonFilter : "" });
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
-    setTeams(getTeams());
-    setHackathons(getHackathons());
+    async function load() {
+      try {
+        const [teamData, hackathonData] = await Promise.all([
+          getTeams(),
+          getHackathons(),
+        ]);
+        setTeams(teamData);
+        setHackathons(hackathonData);
+        setStatus("loaded");
+      } catch {
+        setStatus("error");
+      }
+    }
+    load();
+
+    supabase.auth.getSession().then((res: { data: { session: Session | null } }) => {
+      setIsLoggedIn(!!res.data.session?.user);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
+      setIsLoggedIn(!!session?.user);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   const allRoles = Array.from(new Set(teams.flatMap((t) => t.lookingFor)));
@@ -34,23 +60,33 @@ function CampContent() {
     return true;
   });
 
-  function handleCreate(e: React.FormEvent) {
+  async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    const team: Team = {
-      teamCode: `T-${Date.now()}`,
-      hackathonSlug: form.hackathonSlug,
-      name: form.name,
-      isOpen: true,
-      memberCount: 1,
-      lookingFor: form.lookingFor.split(",").map((s) => s.trim()).filter(Boolean),
-      intro: form.intro,
-      contact: { type: "link", url: form.contactUrl },
-      createdAt: new Date().toISOString(),
-    };
-    addTeam(team);
-    setTeams(getTeams());
-    setShowForm(false);
-    setForm({ name: "", intro: "", lookingFor: "", contactUrl: "", hackathonSlug: "" });
+    setFormError("");
+    if (!isLoggedIn) {
+      setFormError("팀을 만들려면 로그인이 필요합니다.");
+      return;
+    }
+    try {
+      const team: Team = {
+        teamCode: `T-${Date.now()}`,
+        hackathonSlug: form.hackathonSlug,
+        name: form.name,
+        isOpen: true,
+        memberCount: 1,
+        lookingFor: form.lookingFor.split(",").map((s) => s.trim()).filter(Boolean),
+        intro: form.intro,
+        contact: { type: "link", url: form.contactUrl },
+        createdAt: new Date().toISOString(),
+      };
+      await addTeam(team);
+      const updated = await getTeams();
+      setTeams(updated);
+      setShowForm(false);
+      setForm({ name: "", intro: "", lookingFor: "", contactUrl: "", hackathonSlug: "" });
+    } catch {
+      setFormError("팀 등록에 실패했습니다. 다시 시도해 주세요.");
+    }
   }
 
   return (
@@ -62,7 +98,10 @@ function CampContent() {
           <p className="text-muted-foreground text-sm mt-1">함께할 팀원을 찾거나, 새로운 팀을 만들어보세요.</p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (!isLoggedIn) { setShowForm(false); return; }
+            setShowForm(!showForm);
+          }}
           className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
         >
           <Plus size={16} />
@@ -70,8 +109,21 @@ function CampContent() {
         </button>
       </div>
 
+      {/* 로그인 필요 알림 */}
+      {!isLoggedIn && (
+        <div className="mb-6 rounded-xl border border-border bg-muted/40 p-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">팀 만들기와 제출은 로그인 후 이용할 수 있습니다.</p>
+          <button
+            onClick={() => signInWithGoogle()}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 shrink-0"
+          >
+            <LogIn size={12} /> Google 로그인
+          </button>
+        </div>
+      )}
+
       {/* Team creation form */}
-      {showForm && (
+      {showForm && isLoggedIn && (
         <div className="mb-6 rounded-xl border border-border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold">새 팀 등록</h2>
@@ -79,6 +131,9 @@ function CampContent() {
               <X size={18} />
             </button>
           </div>
+          {formError && (
+            <p className="text-sm text-destructive mb-3">{formError}</p>
+          )}
           <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium mb-1">팀 이름 *</label>
@@ -151,10 +206,16 @@ function CampContent() {
         <span className="self-center text-sm text-muted-foreground">{filtered.length}팀</span>
       </div>
 
-      {/* Grid */}
-      {filtered.length === 0 ? (
-        <div className="py-20 text-center text-muted-foreground">조건에 맞는 팀이 없습니다.</div>
-      ) : (
+      {status === "loading" && (
+        <div className="py-20 text-center text-muted-foreground">로딩중...</div>
+      )}
+      {status === "error" && (
+        <div className="py-20 text-center text-destructive">데이터를 불러오는 중 오류가 발생했습니다.</div>
+      )}
+      {status === "loaded" && filtered.length === 0 && (
+        <div className="py-20 text-center text-muted-foreground">데이터 없음</div>
+      )}
+      {status === "loaded" && filtered.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((team) => (
             <div key={team.teamCode} className="rounded-xl border border-border bg-card p-5 flex flex-col gap-3 hover:shadow-md transition-shadow">

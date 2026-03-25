@@ -11,10 +11,27 @@
 
 ---
 
-## localStorage 전용 데이터 레이어
-- **선택**: 서버·DB 없이 localStorage만 사용
-- **이유**: 대회 명세서에 "더미 데이터/로컬 저장소(localStorage 등)를 활용해 구현" 명시. 심사자가 별도 키 없이 확인 가능해야 하므로 외부 의존성 최소화
-- **날짜**: 2026-03-22
+## Supabase 선택 (localStorage → PostgreSQL)
+- **선택**: 데이터 레이어를 localStorage에서 Supabase(PostgreSQL + Auth)로 전환
+- **이유**: Vercel 배포 후 다른 브라우저/기기 간 데이터 공유 불가 → Supabase는 무료 티어 + Next.js SSR 공식 지원(`@supabase/ssr`) + 내장 Auth로 단일 서비스 커버
+- **트레이드오프**: JSONB 패턴으로 타입 전체를 JSON 컬럼 1개에 저장 → 스키마 마이그레이션 없이 유연한 타입 변경 가능하지만 DB 레벨 쿼리·인덱싱 제한
+- **날짜**: 2026-03-25
+
+---
+
+## SSR-safe Supabase 클라이언트 (typeof window 가드)
+- **선택**: `supabase.ts`에서 `typeof window === "undefined"` 체크 후 `undefined` 반환
+- **이유**: `createBrowserClient`는 URL validation을 즉시 실행 → 서버 빌드 타임에 `NEXT_PUBLIC_SUPABASE_URL` 없으면 "Must be a valid HTTP or HTTPS URL" 에러 발생. `typeof window` 가드로 클라이언트 전용 실행 보장
+- **트레이드오프**: 서버 컴포넌트에서 `supabase`를 직접 사용 불가 (현재 모든 DB 호출이 클라이언트 컴포넌트라 문제 없음)
+- **날짜**: 2026-03-25
+
+---
+
+## Google OAuth 팝업 방식
+- **선택**: `skipBrowserRedirect: true` + `window.open()` 팝업으로 로그인
+- **이유**: 전체 페이지 이동 시 현재 스크롤·상태가 초기화됨. 팝업은 부모 창 상태 유지하면서 인증 완료 후 자동 닫힘
+- **세션 전파 방식**: 콜백을 server Route Handler(`route.ts`) 대신 client page(`page.tsx`)로 구현 → `exchangeCodeForSession` 클라이언트 실행 → Supabase가 localStorage에 세션 저장 → storage 이벤트로 부모 창 `onAuthStateChange` 자동 트리거 → 새로고침 없이 Navbar 상태 갱신
+- **날짜**: 2026-03-25
 
 ---
 
@@ -33,22 +50,15 @@
 ---
 
 ## seed.ts 인라인 더미 데이터
-- **선택**: `data/example/*.json`을 `web/src/lib/seed.ts`에 인라인 TypeScript 상수로 복사
-- **이유**: Next.js App Router에서 `public/` 외 JSON 파일을 클라이언트에서 직접 fetch하려면 추가 설정 필요. 인라인으로 두면 빌드 타임에 포함되고 localStorage 시드 로직과 타입 안전성 보장
-- **날짜**: 2026-03-22
+- **선택**: `data/example/*.json`을 `web/src/lib/seed.ts`에 인라인 TypeScript 상수로 보관, 실제 DB 시드는 `web/supabase/schema.sql` SQL INSERT
+- **이유**: seed.ts는 타입 참조용으로 유지. 실제 Supabase DB 시드는 schema.sql의 `on conflict do nothing` INSERT로 한 번만 실행
+- **날짜**: 2026-03-25 (변경), 2026-03-22 (최초)
 
 ---
 
 ## web/ 서브디렉토리 구조
 - **선택**: 레포 루트(`dacon_vibe/`)가 아닌 `web/` 서브디렉토리에 Next.js 앱 생성
 - **이유**: `create-next-app`이 기존 파일(`CLAUDE.md`, `data/`)과 충돌하여 서브디렉토리에 생성. GitHub repo는 `web/`을 root로 push. Vercel도 root directory 자동 감지
-- **날짜**: 2026-03-22
-
----
-
-## SeedInitializer 분리 컴포넌트
-- **선택**: seed 로직을 `layout.tsx` 안 `"use client"` 컴포넌트로 분리
-- **이유**: App Router에서 layout.tsx는 서버 컴포넌트. localStorage 접근은 클라이언트 전용이므로 별도 `SeedInitializer` 클라이언트 컴포넌트로 분리 후 layout에서 import
 - **날짜**: 2026-03-22
 
 ---

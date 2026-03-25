@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## 2026-03-25
+
+### Supabase 연동 (localStorage → PostgreSQL)
+- `@supabase/supabase-js` + `@supabase/ssr` 패키지 설치
+- `src/lib/supabase.ts` 신규 — SSR-safe 브라우저 클라이언트 (`typeof window` 가드로 빌드 타임 URL validation 오류 방지)
+- `src/lib/storage.ts` 전면 교체 — 모든 함수 `async`, Supabase JSONB 쿼리로 변경 (함수 시그니처 유지)
+- `src/components/layout/SeedInitializer.tsx` — stub으로 단순화 (시드는 `supabase/schema.sql` SQL INSERT로 이관)
+- `web/supabase/schema.sql` 신규 — DDL + RLS 정책 + 전체 시드 데이터 (hackathons 3, teams 4, leaderboards 2)
+- `.env.local` — `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` 추가
+
+### Google OAuth 팝업 로그인
+- `src/lib/auth.ts` 신규 — `signInWithGoogle()` / `signOut()` / `getSession()` 헬퍼
+  - `skipBrowserRedirect: true` + `window.open()` 팝업 방식
+  - `queryParams: { prompt: "select_account" }` — 항상 계정 선택 강제
+  - 팝업 닫힘 감지 후 `supabase.auth.getSession()` 호출
+- `src/app/auth/callback/page.tsx` 신규 (이전 `route.ts` 삭제)
+  - 클라이언트 컴포넌트로 OAuth code 교환 → localStorage에 세션 저장 → `window.close()`
+  - `onAuthStateChange`가 부모 창에서 자동 트리거되어 새로고침 없이 로그인 상태 반영
+  - `fixed inset-0 bg-background z-[9999]` 오버레이로 팝업에서 레이아웃 flash 방지
+- GitHub 로그인 제거 (Google 단독)
+
+### Navbar 개선
+- 링크 구조: 메인 / 해커톤 / 캠프 / 랭킹 (4개)
+- 현재 페이지 `bg-primary text-primary-foreground shadow-sm` 색깔 박스 active 표시
+- 글씨 크기 키우고 `font-bold` 적용
+- 로그인 버튼 추가, 로그인 시 이니셜 동그라미 아이콘만 표시 (이메일 텍스트 제거)
+- 로그아웃 시 `window.location.reload()` 새로고침
+
+### 로딩·에러·빈 상태
+- 모든 페이지(`/`, `/hackathons`, `/hackathons/[slug]`, `/camp`, `/rankings`)에 `status: "loading" | "loaded" | "error"` 패턴 적용
+- 로딩 중: "로딩중..." / 에러: "데이터를 불러오는 중 오류가 발생했습니다." / 데이터 없음: "데이터 없음" 표시
+
+### 인증 게이트
+- `/camp` — 비로그인 시 상단 Google 로그인 배너 표시, 팀 만들기 버튼 비활성
+- `/hackathons/[slug]` 제출 탭 — 비로그인 시 로그인 유도 메시지
+
+---
+
 ## 2026-03-22
 
 - Next.js 14 App Router 프로젝트 초기 세팅 (`web/`)

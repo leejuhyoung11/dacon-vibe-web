@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { getAllLeaderboards, getHackathons } from "@/lib/storage";
-import type { Leaderboard, Hackathon } from "@/lib/types";
 import { Medal, Trophy } from "lucide-react";
 
 interface GlobalEntry {
@@ -14,6 +13,8 @@ interface GlobalEntry {
   submittedAt: string;
 }
 
+type Status = "loading" | "loaded" | "error";
+
 function RankBadge({ rank }: { rank: number }) {
   if (rank === 1) return <Medal size={20} className="text-yellow-500" />;
   if (rank === 2) return <Medal size={20} className="text-gray-400" />;
@@ -23,33 +24,42 @@ function RankBadge({ rank }: { rank: number }) {
 
 export default function RankingsPage() {
   const [entries, setEntries] = useState<GlobalEntry[]>([]);
+  const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
-    const leaderboards = getAllLeaderboards();
-    const hackathons = getHackathons();
-    const hackathonMap = Object.fromEntries(hackathons.map((h) => [h.slug, h.title]));
+    async function load() {
+      try {
+        const [leaderboards, hackathons] = await Promise.all([
+          getAllLeaderboards(),
+          getHackathons(),
+        ]);
+        const hackathonMap = Object.fromEntries(hackathons.map((h) => [h.slug, h.title]));
 
-    const all: GlobalEntry[] = leaderboards.flatMap((lb) =>
-      lb.entries.map((e) => ({
-        rank: 0,
-        teamName: e.teamName,
-        hackathonTitle: hackathonMap[lb.hackathonSlug] ?? lb.hackathonSlug,
-        hackathonSlug: lb.hackathonSlug,
-        score: e.score,
-        submittedAt: e.submittedAt,
-      }))
-    );
+        const all: GlobalEntry[] = leaderboards.flatMap((lb) =>
+          lb.entries.map((e) => ({
+            rank: 0,
+            teamName: e.teamName,
+            hackathonTitle: hackathonMap[lb.hackathonSlug] ?? lb.hackathonSlug,
+            hackathonSlug: lb.hackathonSlug,
+            score: e.score,
+            submittedAt: e.submittedAt,
+          }))
+        );
 
-    // Sort by score descending and assign global rank
-    all.sort((a, b) => b.score - a.score);
-    all.forEach((e, i) => { e.rank = i + 1; });
+        all.sort((a, b) => b.score - a.score);
+        all.forEach((e, i) => { e.rank = i + 1; });
 
-    setEntries(all);
+        setEntries(all);
+        setStatus("loaded");
+      } catch {
+        setStatus("error");
+      }
+    }
+    load();
   }, []);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      {/* Header */}
       <div className="flex items-center gap-3 mb-8">
         <div className="p-3 rounded-full bg-primary/10">
           <Trophy size={24} className="text-primary" />
@@ -60,9 +70,16 @@ export default function RankingsPage() {
         </div>
       </div>
 
-      {entries.length === 0 ? (
-        <div className="py-20 text-center text-muted-foreground">아직 등록된 제출 내역이 없습니다.</div>
-      ) : (
+      {status === "loading" && (
+        <div className="py-20 text-center text-muted-foreground">로딩중...</div>
+      )}
+      {status === "error" && (
+        <div className="py-20 text-center text-destructive">데이터를 불러오는 중 오류가 발생했습니다.</div>
+      )}
+      {status === "loaded" && entries.length === 0 && (
+        <div className="py-20 text-center text-muted-foreground">데이터 없음</div>
+      )}
+      {status === "loaded" && entries.length > 0 && (
         <div className="rounded-xl border border-border overflow-hidden">
           <table className="w-full text-sm">
             <thead>

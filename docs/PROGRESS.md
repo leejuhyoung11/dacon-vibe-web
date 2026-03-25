@@ -5,15 +5,25 @@
 | 항목 | 파일 |
 |------|------|
 | 라우트 5개 구현 (`/` · `/hackathons` · `/hackathons/[slug]` · `/camp` · `/rankings`) | `web/src/app/` |
-| localStorage 데이터 레이어 | `web/src/lib/storage.ts` |
-| 앱 최초 실행 시 더미 데이터 자동 시드 | `web/src/lib/seed.ts` |
+| Supabase PostgreSQL 데이터 레이어 (localStorage → DB) | `web/src/lib/storage.ts` |
+| Supabase 테이블 스키마 + RLS 정책 + 시드 SQL | `web/supabase/schema.sql` |
+| SSR-safe Supabase 브라우저 클라이언트 | `web/src/lib/supabase.ts` |
+| Google OAuth 팝업 로그인 (항상 계정 선택 강제) | `web/src/lib/auth.ts` |
+| 팝업 로그인 후 부모 창 자동 세션 갱신 (새로고침 불필요) | `web/src/app/auth/callback/page.tsx` |
+| 팝업 레이아웃 flash 방지 (full-screen overlay) | `web/src/app/auth/callback/page.tsx` |
+| 로그아웃 후 페이지 새로고침 | `Navbar.tsx` |
+| Navbar: 4개 링크 + active 색깔 박스 + bold | `Navbar.tsx` |
+| Navbar: 로그인/로그아웃 UI, 이니셜 아이콘 | `Navbar.tsx` |
+| 다크모드 토글 (localStorage 기반) | `Navbar.tsx` |
+| 모든 페이지 로딩·에러·빈 상태 | 각 `page.tsx` |
+| 비로그인 시 팀 만들기 / 제출 게이트 | `camp/page.tsx`, `[slug]/page.tsx` |
 | TypeScript 타입 정의 (Hackathon · Team · Leaderboard · Submission) | `web/src/lib/types.ts` |
+| 더미 데이터 시드 (해커톤 3개, 팀 4개, 리더보드 2개) | `web/src/lib/seed.ts` |
 | 해커톤 상세 탭 7개 (개요·평가·일정·상금·팀·제출·리더보드) | `web/src/app/hackathons/[slug]/page.tsx` |
 | 마일스톤 세로 타임라인 (done·current·upcoming 상태) | `MilestoneTimeline.tsx` |
 | 리더보드 테이블 (scoreBreakdown·artifacts 조건부 렌더링) | `LeaderboardTable.tsx` |
 | 팀 목록 · 팀 생성 폼 · 필터 | `web/src/app/camp/page.tsx` |
 | 글로벌 랭킹 테이블 | `web/src/app/rankings/page.tsx` |
-| 다크모드 토글 (localStorage 기반) | `Navbar.tsx` |
 | lime/green 테마 시스템 (CSS custom properties) | `globals.css` |
 | Vercel 배포 | https://vercel.com/leejuhyoung11s-projects/dacon-vibe-web |
 | GitHub 연동 | https://github.com/leejuhyoung11/dacon-vibe-web |
@@ -24,23 +34,23 @@
 
 | 항목 | 위치 | 내용 |
 |------|------|------|
-| 제출 teamName 하드코딩 | `[slug]/page.tsx:54` | `teamName: "나의 팀"` — 사용자 입력 없음 |
-| 글로벌 랭킹 점수 단위 불일치 | `rankings/page.tsx` | metric(0.7421)과 vote(87.5)를 동일 기준으로 정렬 |
+| 제출 teamName 하드코딩 | `[slug]/page.tsx` | `teamName: "나의 팀"` — 사용자 입력 없음 |
+| 글로벌 랭킹 점수 단위 불일치 | `rankings/page.tsx` | metric(0~1)과 vote(0~100)를 동일 기준으로 정렬 |
 | 제출 후 리더보드 미반영 | `[slug]/page.tsx` | `addSubmission` 호출 후 `updateLeaderboard` 미연결 |
-| 팀 memberCount 고정 | `camp/page.tsx:42` | 새 팀 생성 시 항상 1, 이후 변경 불가 |
+| 팀 memberCount 고정 | `camp/page.tsx` | 새 팀 생성 시 항상 1, 이후 변경 불가 |
 | 팀 수정·삭제 기능 없음 | `camp/page.tsx` | 생성만 가능 |
 | 썸네일 placeholder | `seed.ts` | `placehold.co` 더미 URL 사용 중 |
-| "참여 방법 알아보기" 버튼 미동작 | `hackathons/page.tsx:45` | 클릭 이벤트 없음 |
-| 메인 페이지 하단 섹션 없음 | `app/page.tsx` | daker.ai 레퍼런스처럼 Features 섹션 등 추가 여지 |
+| "참여 방법 알아보기" 버튼 미동작 | `hackathons/page.tsx` | 클릭 이벤트 없음 |
+| 메인 페이지 하단 섹션 없음 | `app/page.tsx` | Features 섹션 등 추가 여지 |
 
 ---
 
 ## 📋 TODO (우선순위 순)
 
 1. **제출 → 리더보드 연동**: 제출 완료 시 해당 hackathon의 leaderboard entry 추가
-2. **사용자 식별**: 팀명 직접 입력 또는 간단한 닉네임 저장
+2. **사용자 식별**: 팀명 직접 입력 또는 로그인 유저의 이메일 기반 자동 설정
 3. **글로벌 랭킹 정규화**: 해커톤 타입(metric/vote)별 점수 분리 표시
 4. **메인 페이지 확장**: Features 섹션, 진행 중 해커톤 카드 미리보기
-5. **팀 수정/삭제**: camp 페이지에서 자신이 만든 팀 관리
+5. **팀 수정/삭제**: camp 페이지에서 자신이 만든 팀 관리 (creator_id 기반)
 6. **실제 썸네일**: placeholder 대신 각 해커톤에 맞는 이미지
 7. **UX 개선 논의**: research.md 참고

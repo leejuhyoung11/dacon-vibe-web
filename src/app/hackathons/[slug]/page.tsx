@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getHackathonDetail, getHackathons, getLeaderboard, getTeamsByHackathon, addSubmission, getSubmissions } from "@/lib/storage";
+import { supabase } from "@/lib/supabase";
+import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 import type { HackathonDetail, Hackathon, Leaderboard, Team, Submission } from "@/lib/types";
 import MilestoneTimeline from "@/components/hackathon/MilestoneTimeline";
 import LeaderboardTable from "@/components/leaderboard/LeaderboardTable";
@@ -18,47 +20,84 @@ export default function HackathonDetailPage() {
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [pageStatus, setPageStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // Submit form state
   const [submitValues, setSubmitValues] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   useEffect(() => {
-    const d = getHackathonDetail(slug);
-    const h = getHackathons().find((x) => x.slug === slug) ?? null;
-    const lb = getLeaderboard(slug);
-    const t = getTeamsByHackathon(slug);
-    const s = getSubmissions(slug);
-    setDetail(d);
-    setHackathon(h);
-    setLeaderboard(lb);
-    setTeams(t);
-    setSubmissions(s);
+    async function load() {
+      try {
+        const [d, allHackathons, lb, t, s] = await Promise.all([
+          getHackathonDetail(slug),
+          getHackathons(),
+          getLeaderboard(slug),
+          getTeamsByHackathon(slug),
+          getSubmissions(slug),
+        ]);
+        setDetail(d);
+        setHackathon(allHackathons.find((x) => x.slug === slug) ?? null);
+        setLeaderboard(lb);
+        setTeams(t);
+        setSubmissions(s);
+        setPageStatus("loaded");
+      } catch {
+        setPageStatus("error");
+      }
+    }
+    load();
+
+    supabase.auth.getSession().then((res: { data: { session: Session | null } }) => {
+      setIsLoggedIn(!!res.data.session?.user);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
+      setIsLoggedIn(!!session?.user);
+    });
+    return () => subscription.unsubscribe();
   }, [slug]);
 
-  if (!detail || !hackathon) {
+  if (pageStatus === "loading") {
     return (
       <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground">
-        해커톤 정보를 불러오는 중...
+        로딩중...
+      </div>
+    );
+  }
+
+  if (pageStatus === "error" || !detail || !hackathon) {
+    return (
+      <div className="flex items-center justify-center min-h-[40vh] text-destructive">
+        해커톤 정보를 불러오는 중 오류가 발생했습니다.
       </div>
     );
   }
 
   const { sections } = detail;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const sub: Submission = {
-      id: crypto.randomUUID(),
-      hackathonSlug: slug,
-      teamName: "나의 팀",
-      artifactType: sections.submit.allowedArtifactTypes[0],
-      value: Object.values(submitValues).join(", "),
-      submittedAt: new Date().toISOString(),
-    };
-    addSubmission(sub);
-    setSubmissions((prev) => [...prev, sub]);
-    setSubmitted(true);
+    setSubmitError("");
+    if (!isLoggedIn) {
+      setSubmitError("제출하려면 로그인이 필요합니다.");
+      return;
+    }
+    try {
+      const sub: Submission = {
+        id: crypto.randomUUID(),
+        hackathonSlug: slug,
+        teamName: "나의 팀",
+        artifactType: sections.submit.allowedArtifactTypes[0],
+        value: Object.values(submitValues).join(", "),
+        submittedAt: new Date().toISOString(),
+      };
+      await addSubmission(sub);
+      setSubmissions((prev) => [...prev, sub]);
+      setSubmitted(true);
+    } catch {
+      setSubmitError("제출에 실패했습니다. 다시 시도해 주세요.");
+    }
   }
 
   return (
@@ -170,10 +209,7 @@ export default function HackathonDetailPage() {
                       <span className="font-semibold text-primary">{b.weightPercent}%</span>
                     </div>
                     <div className="h-2 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${b.weightPercent}%` }}
-                      />
+                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${b.weightPercent}%` }} />
                     </div>
                   </div>
                 ))}
@@ -216,10 +252,7 @@ export default function HackathonDetailPage() {
         <TabsContent value="teams" className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">참여 팀 {teams.length}개</p>
-            <Link
-              href={sections.teams.listUrl}
-              className="flex items-center gap-1 text-sm text-primary hover:underline"
-            >
+            <Link href={sections.teams.listUrl} className="flex items-center gap-1 text-sm text-primary hover:underline">
               팀 모집 전체 보기 <ChevronRight size={14} />
             </Link>
           </div>
@@ -243,8 +276,7 @@ export default function HackathonDetailPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Users size={12} />
-                      {team.memberCount}명
+                      <Users size={12} />{team.memberCount}명
                     </span>
                     <a href={team.contact.url} target="_blank" rel="noreferrer"
                       className="flex items-center gap-1 text-xs text-primary hover:underline">
@@ -270,12 +302,17 @@ export default function HackathonDetailPage() {
               ))}
             </ul>
 
-            {submitted ? (
+            {!isLoggedIn ? (
+              <div className="rounded-lg bg-muted/40 border border-border p-4 text-center text-sm text-muted-foreground">
+                제출하려면 로그인이 필요합니다.
+              </div>
+            ) : submitted ? (
               <div className="rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 p-4 text-center">
                 <p className="font-semibold text-green-700 dark:text-green-400">✅ 제출이 완료되었습니다!</p>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
+                {submitError && <p className="text-sm text-destructive">{submitError}</p>}
                 {sections.submit.submissionItems ? (
                   sections.submit.submissionItems.map((item) => (
                     <div key={item.key}>

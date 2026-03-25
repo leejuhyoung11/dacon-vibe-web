@@ -7,13 +7,24 @@ import HackathonListItem from "@/components/hackathon/HackathonListItem";
 import { Trophy } from "lucide-react";
 
 type Filter = "all" | "ongoing" | "upcoming" | "ended";
+type Status = "loading" | "loaded" | "error";
 
 export default function HackathonsPage() {
   const [hackathons, setHackathons] = useState<Hackathon[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
+  const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
-    setHackathons(getHackathons());
+    async function load() {
+      try {
+        const data = await getHackathons();
+        setHackathons(data);
+        setStatus("loaded");
+      } catch {
+        setStatus("error");
+      }
+    }
+    load();
   }, []);
 
   const filtered = filter === "all" ? hackathons : hackathons.filter((h) => h.status === filter);
@@ -27,7 +38,7 @@ export default function HackathonsPage() {
 
   return (
     <div>
-      {/* Hero section — dacon.io/competitions style */}
+      {/* Hero section */}
       <section className="border-b border-border bg-background">
         <div className="mx-auto max-w-6xl px-4 py-14 flex items-center justify-between gap-8">
           <div className="flex-1">
@@ -53,7 +64,6 @@ export default function HackathonsPage() {
               </button>
             </div>
           </div>
-          {/* Illustration */}
           <div className="hidden md:flex items-center justify-center text-8xl select-none shrink-0">
             🏔️🚀
           </div>
@@ -62,7 +72,6 @@ export default function HackathonsPage() {
 
       {/* Filter + List */}
       <section id="list" className="mx-auto max-w-6xl px-4 py-8">
-        {/* Filter tabs */}
         <div className="flex gap-1 mb-6 border-b border-border">
           {filterTabs.map((t) => (
             <button
@@ -79,10 +88,16 @@ export default function HackathonsPage() {
           ))}
         </div>
 
-        {/* List */}
-        {filtered.length === 0 ? (
-          <div className="py-20 text-center text-muted-foreground">해당하는 해커톤이 없습니다.</div>
-        ) : (
+        {status === "loading" && (
+          <div className="py-20 text-center text-muted-foreground">로딩중...</div>
+        )}
+        {status === "error" && (
+          <div className="py-20 text-center text-destructive">데이터를 불러오는 중 오류가 발생했습니다.</div>
+        )}
+        {status === "loaded" && filtered.length === 0 && (
+          <div className="py-20 text-center text-muted-foreground">데이터 없음</div>
+        )}
+        {status === "loaded" && filtered.length > 0 && (
           <div className="divide-y divide-border">
             {filtered.map((h) => (
               <HackathonListItem key={h.slug} hackathon={h} />

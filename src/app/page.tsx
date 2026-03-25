@@ -9,11 +9,20 @@ export default function HomePage() {
   const [stats, setStats] = useState({ hackathons: 0, teams: 0, submissions: 0 });
 
   useEffect(() => {
-    const hackathons = getHackathons();
-    const teams = getTeams();
-    const leaderboards = getAllLeaderboards();
-    const submissions = leaderboards.reduce((acc, lb) => acc + lb.entries.length, 0);
-    setStats({ hackathons: hackathons.length, teams: teams.length, submissions });
+    async function load() {
+      try {
+        const [hackathons, teams, leaderboards] = await Promise.all([
+          getHackathons(),
+          getTeams(),
+          getAllLeaderboards(),
+        ]);
+        const submissions = leaderboards.reduce((acc, lb) => acc + lb.entries.length, 0);
+        setStats({ hackathons: hackathons.length, teams: teams.length, submissions });
+      } catch {
+        // 통계 로드 실패 시 0으로 유지
+      }
+    }
+    load();
   }, []);
 
   return (

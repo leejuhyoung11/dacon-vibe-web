@@ -1,101 +1,91 @@
 import type { Hackathon, HackathonDetail, Team, Leaderboard, Submission } from "./types";
-
-const KEYS = {
-  hackathons: "hackathons",
-  hackathonDetails: "hackathon_details",
-  teams: "teams",
-  leaderboards: "leaderboards",
-  submissions: "submissions",
-  seeded: "__seeded__",
-} as const;
-
-function get<T>(key: string): T | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-function set<T>(key: string, value: T): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(value));
-}
+import { supabase } from "./supabase";
 
 // Hackathons
-export function getHackathons(): Hackathon[] {
-  return get<Hackathon[]>(KEYS.hackathons) ?? [];
+export async function getHackathons(): Promise<Hackathon[]> {
+  const { data, error } = await supabase.from("hackathons").select("data");
+  if (error) throw error;
+  return (data ?? []).map((row: { data: unknown }) => row.data as Hackathon);
 }
 
-export function getHackathonDetail(slug: string): HackathonDetail | null {
-  const all = get<HackathonDetail[]>(KEYS.hackathonDetails) ?? [];
-  return all.find((h) => h.slug === slug) ?? null;
+export async function getHackathonDetail(slug: string): Promise<HackathonDetail | null> {
+  const { data, error } = await supabase
+    .from("hackathon_details")
+    .select("data")
+    .eq("slug", slug)
+    .single();
+  if (error) return null;
+  return (data?.data as HackathonDetail) ?? null;
 }
 
 // Teams
-export function getTeams(): Team[] {
-  return get<Team[]>(KEYS.teams) ?? [];
+export async function getTeams(): Promise<Team[]> {
+  const { data, error } = await supabase.from("teams").select("data");
+  if (error) throw error;
+  return (data ?? []).map((row: { data: unknown }) => row.data as Team);
 }
 
-export function getTeamsByHackathon(slug: string): Team[] {
-  return getTeams().filter((t) => t.hackathonSlug === slug);
+export async function getTeamsByHackathon(slug: string): Promise<Team[]> {
+  const { data, error } = await supabase
+    .from("teams")
+    .select("data")
+    .eq("hackathon_slug", slug);
+  if (error) throw error;
+  return (data ?? []).map((row: { data: unknown }) => row.data as Team);
 }
 
-export function addTeam(team: Team): void {
-  const teams = getTeams();
-  set(KEYS.teams, [...teams, team]);
+export async function addTeam(team: Team): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from("teams").insert({
+    team_code: team.teamCode,
+    hackathon_slug: team.hackathonSlug,
+    creator_id: user?.id ?? null,
+    data: team,
+  });
+  if (error) throw error;
 }
 
 // Leaderboards
-export function getLeaderboard(slug: string): Leaderboard | null {
-  const all = get<Leaderboard[]>(KEYS.leaderboards) ?? [];
-  return all.find((l) => l.hackathonSlug === slug) ?? null;
+export async function getLeaderboard(slug: string): Promise<Leaderboard | null> {
+  const { data, error } = await supabase
+    .from("leaderboards")
+    .select("data")
+    .eq("hackathon_slug", slug)
+    .single();
+  if (error) return null;
+  return (data?.data as Leaderboard) ?? null;
 }
 
-export function getAllLeaderboards(): Leaderboard[] {
-  return get<Leaderboard[]>(KEYS.leaderboards) ?? [];
+export async function getAllLeaderboards(): Promise<Leaderboard[]> {
+  const { data, error } = await supabase.from("leaderboards").select("data");
+  if (error) throw error;
+  return (data ?? []).map((row: { data: unknown }) => row.data as Leaderboard);
 }
 
-export function updateLeaderboard(lb: Leaderboard): void {
-  const all = getAllLeaderboards();
-  const idx = all.findIndex((l) => l.hackathonSlug === lb.hackathonSlug);
-  if (idx >= 0) all[idx] = lb;
-  else all.push(lb);
-  set(KEYS.leaderboards, all);
+export async function updateLeaderboard(lb: Leaderboard): Promise<void> {
+  const { error } = await supabase
+    .from("leaderboards")
+    .upsert({ hackathon_slug: lb.hackathonSlug, data: lb });
+  if (error) throw error;
 }
 
 // Submissions
-export function getSubmissions(slug: string): Submission[] {
-  const all = get<Submission[]>(KEYS.submissions) ?? [];
-  return all.filter((s) => s.hackathonSlug === slug);
+export async function getSubmissions(slug: string): Promise<Submission[]> {
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("data")
+    .eq("hackathon_slug", slug);
+  if (error) return [];
+  return (data ?? []).map((row: { data: unknown }) => row.data as Submission);
 }
 
-export function addSubmission(sub: Submission): void {
-  const all = get<Submission[]>(KEYS.submissions) ?? [];
-  set(KEYS.submissions, [...all, sub]);
-}
-
-// Seed
-export function isSeeded(): boolean {
-  return localStorage.getItem(KEYS.seeded) === "1";
-}
-
-export function markSeeded(): void {
-  localStorage.setItem(KEYS.seeded, "1");
-}
-
-export function seedData(data: {
-  hackathons: Hackathon[];
-  hackathonDetails: HackathonDetail[];
-  teams: Team[];
-  leaderboards: Leaderboard[];
-}): void {
-  set(KEYS.hackathons, data.hackathons);
-  set(KEYS.hackathonDetails, data.hackathonDetails);
-  set(KEYS.teams, data.teams);
-  set(KEYS.leaderboards, data.leaderboards);
-  markSeeded();
+export async function addSubmission(sub: Submission): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from("submissions").insert({
+    id: sub.id,
+    hackathon_slug: sub.hackathonSlug,
+    user_id: user?.id ?? null,
+    data: sub,
+  });
+  if (error) throw error;
 }

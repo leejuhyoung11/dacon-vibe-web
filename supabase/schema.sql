@@ -133,3 +133,67 @@ insert into leaderboards (hackathon_slug, data) values
   '{"hackathonSlug":"daker-handover-2026-03","updatedAt":"2026-04-17T10:00:00+09:00","entries":[{"rank":1,"teamName":"404found","score":87.5,"submittedAt":"2026-04-13T09:58:00+09:00","scoreBreakdown":{"participant":82,"judge":90},"artifacts":{"webUrl":"https://404found.vercel.app","pdfUrl":"https://example.com/404found-solution.pdf","planTitle":"404found 기획서"}},{"rank":2,"teamName":"LGTM","score":84.2,"submittedAt":"2026-04-13T09:40:00+09:00","scoreBreakdown":{"participant":79,"judge":88},"artifacts":{"webUrl":"https://lgtm-hack.vercel.app","pdfUrl":"https://example.com/lgtm-solution.pdf","planTitle":"LGTM 기획서"}}]}'::jsonb
 )
 on conflict (hackathon_slug) do nothing;
+
+-- =====================================================
+-- WARROOM 테이블 (2026-03-26 추가)
+-- =====================================================
+
+create table if not exists warroom_tasks (
+  id text primary key,
+  team_code text references teams(team_code) on delete cascade,
+  title text not null,
+  assignee text,
+  due_date timestamptz,
+  status text default 'todo',
+  priority text default 'medium',
+  created_at timestamptz default now()
+);
+
+create table if not exists warroom_chats (
+  id text primary key,
+  team_code text references teams(team_code) on delete cascade,
+  user_id uuid references auth.users(id) on delete set null,
+  user_email text not null default '',
+  content text not null,
+  is_system boolean default false,
+  created_at timestamptz default now()
+);
+
+create table if not exists warroom_docs (
+  team_code text primary key references teams(team_code) on delete cascade,
+  content text default '',
+  last_edited_by text,
+  last_edited_at timestamptz default now()
+);
+
+create table if not exists warroom_submissions (
+  id text primary key,
+  team_code text references teams(team_code) on delete cascade,
+  deadline_key text not null,
+  status text default 'pending',
+  url text,
+  submitted_by text,
+  submitted_at timestamptz,
+  confirmed_by text[] default '{}'
+);
+
+alter table warroom_tasks enable row level security;
+alter table warroom_chats enable row level security;
+alter table warroom_docs enable row level security;
+alter table warroom_submissions enable row level security;
+
+create policy "warroom_tasks_read" on warroom_tasks for select using (true);
+create policy "warroom_tasks_write" on warroom_tasks for insert with check (auth.uid() is not null);
+create policy "warroom_tasks_update" on warroom_tasks for update using (auth.uid() is not null);
+create policy "warroom_tasks_delete" on warroom_tasks for delete using (auth.uid() is not null);
+
+create policy "warroom_chats_read" on warroom_chats for select using (true);
+create policy "warroom_chats_write" on warroom_chats for insert with check (auth.uid() is not null);
+
+create policy "warroom_docs_read" on warroom_docs for select using (true);
+create policy "warroom_docs_write" on warroom_docs for insert with check (auth.uid() is not null);
+create policy "warroom_docs_update" on warroom_docs for update using (auth.uid() is not null);
+
+create policy "warroom_submissions_read" on warroom_submissions for select using (true);
+create policy "warroom_submissions_write" on warroom_submissions for insert with check (auth.uid() is not null);
+create policy "warroom_submissions_update" on warroom_submissions for update using (auth.uid() is not null);

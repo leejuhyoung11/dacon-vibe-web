@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getHackathonDetail, getHackathons, getLeaderboard, getTeamsByHackathon, addSubmission, getSubmissions } from "@/lib/storage";
+import { getHackathonDetail, getHackathons, getLeaderboard, getTeamsByHackathon, addSubmission, getSubmissions, getMyTeamCodes } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 import type { HackathonDetail, Hackathon, Leaderboard, Team, Submission } from "@/lib/types";
@@ -11,7 +11,7 @@ import MilestoneTimeline from "@/components/hackathon/MilestoneTimeline";
 import LeaderboardTable from "@/components/leaderboard/LeaderboardTable";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ExternalLink, Users, ChevronRight } from "lucide-react";
+import { ExternalLink, Users, ChevronRight, Shield } from "lucide-react";
 
 export default function HackathonDetailPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -22,6 +22,7 @@ export default function HackathonDetailPage() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [pageStatus, setPageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [myTeamCodes, setMyTeamCodes] = useState<Set<string>>(new Set());
 
   const [submitValues, setSubmitValues] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -51,9 +52,12 @@ export default function HackathonDetailPage() {
 
     supabase.auth.getSession().then((res: { data: { session: Session | null } }) => {
       setIsLoggedIn(!!res.data.session?.user);
+      if (res.data.session?.user) getMyTeamCodes().then(setMyTeamCodes);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       setIsLoggedIn(!!session?.user);
+      if (session?.user) getMyTeamCodes().then(setMyTeamCodes);
+      else setMyTeamCodes(new Set());
     });
     return () => subscription.unsubscribe();
   }, [slug]);
@@ -278,10 +282,18 @@ export default function HackathonDetailPage() {
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Users size={12} />{team.memberCount}명
                     </span>
-                    <a href={team.contact.url} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-1 text-xs text-primary hover:underline">
-                      연락하기 <ExternalLink size={12} />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      {myTeamCodes.has(team.teamCode) && (
+                        <Link href={`/warroom/${team.teamCode}`}
+                          className="flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 px-2 py-1 rounded-md transition-colors">
+                          <Shield size={11} /> 작전실
+                        </Link>
+                      )}
+                      <a href={team.contact.url} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-1 text-xs text-primary hover:underline">
+                        연락하기 <ExternalLink size={12} />
+                      </a>
+                    </div>
                   </div>
                 </div>
               ))}

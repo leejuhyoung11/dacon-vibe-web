@@ -142,6 +142,45 @@ export interface Leaderboard {
   entries: LeaderboardEntry[];
 }
 
+// Warroom
+export interface WarroomTask {
+  id: string;
+  teamCode: string;
+  title: string;
+  assignee?: string;
+  dueDate?: string;
+  status: "todo" | "inprogress" | "done";
+  priority: "high" | "medium" | "low";
+  createdAt: string;
+}
+
+export interface WarroomChat {
+  id: string;
+  teamCode: string;
+  userEmail: string;
+  content: string;
+  isSystem: boolean;
+  createdAt: string;
+}
+
+export interface WarroomDoc {
+  teamCode: string;
+  content: string;
+  lastEditedBy?: string;
+  lastEditedAt: string;
+}
+
+export interface WarroomSubmission {
+  id: string;
+  teamCode: string;
+  deadlineKey: string;
+  status: "pending" | "submitted";
+  url?: string;
+  submittedBy?: string;
+  submittedAt?: string;
+  confirmedBy: string[];
+}
+
 // Submission (user-created)
 export interface Submission {
   id: string;

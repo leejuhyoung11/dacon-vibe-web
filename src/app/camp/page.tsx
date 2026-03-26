@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { getTeams, getHackathons, addTeam } from "@/lib/storage";
+import { getTeams, getHackathons, addTeam, getMyTeamCodes, addWarroomTask, getHackathonDetail } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { signInWithGoogle } from "@/lib/auth";
 import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 import type { Team, Hackathon } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
-import { Users, ExternalLink, Plus, X, LogIn } from "lucide-react";
+import { Users, ExternalLink, Plus, X, LogIn, Shield } from "lucide-react";
+import Link from "next/link";
 import { Suspense } from "react";
 
 function CampContent() {
@@ -25,6 +26,7 @@ function CampContent() {
   const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [formError, setFormError] = useState("");
+  const [myTeamCodes, setMyTeamCodes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     async function load() {
@@ -44,9 +46,12 @@ function CampContent() {
 
     supabase.auth.getSession().then((res: { data: { session: Session | null } }) => {
       setIsLoggedIn(!!res.data.session?.user);
+      if (res.data.session?.user) getMyTeamCodes().then(setMyTeamCodes);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       setIsLoggedIn(!!session?.user);
+      if (session?.user) getMyTeamCodes().then(setMyTeamCodes);
+      else setMyTeamCodes(new Set());
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -80,8 +85,26 @@ function CampContent() {
         createdAt: new Date().toISOString(),
       };
       await addTeam(team);
+      // 기본 태스크 자동 생성
+      const hackathonDetail = team.hackathonSlug ? await getHackathonDetail(team.hackathonSlug) : null;
+      const milestones = hackathonDetail?.sections.schedule.milestones ?? [];
+      const defaultTasks = [
+        { title: "기획서 작성", milestone: milestones.find((m) => m.name.includes("기획서")) },
+        { title: "산출물 개발", milestone: milestones.find((m) => m.name.includes("웹링크") || m.name.includes("제출 마감")) },
+        { title: "최종 제출", milestone: milestones[milestones.length - 1] },
+      ];
+      await Promise.all(defaultTasks.map((t) =>
+        addWarroomTask({
+          teamCode: team.teamCode,
+          title: t.title,
+          status: "todo",
+          priority: "medium",
+          dueDate: t.milestone?.at,
+        })
+      ));
       const updated = await getTeams();
       setTeams(updated);
+      setMyTeamCodes((prev) => new Set([...prev, team.teamCode]));
       setShowForm(false);
       setForm({ name: "", intro: "", lookingFor: "", contactUrl: "", hackathonSlug: "" });
     } catch {
@@ -240,10 +263,18 @@ function CampContent() {
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Users size={12} /> {team.memberCount}명
                 </span>
-                <a href={team.contact.url} target="_blank" rel="noreferrer"
-                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                  연락하기 <ExternalLink size={12} />
-                </a>
+                <div className="flex items-center gap-2">
+                  {myTeamCodes.has(team.teamCode) && (
+                    <Link href={`/warroom/${team.teamCode}`}
+                      className="flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 px-2 py-1 rounded-md transition-colors">
+                      <Shield size={11} /> 작전실
+                    </Link>
+                  )}
+                  <a href={team.contact.url} target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                    연락하기 <ExternalLink size={12} />
+                  </a>
+                </div>
               </div>
             </div>
           ))}

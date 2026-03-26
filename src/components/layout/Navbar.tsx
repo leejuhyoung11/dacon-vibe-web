@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
-import { Sun, Moon, LogIn, LogOut } from "lucide-react";
+import { Sun, Moon, LogIn, LogOut, Shield } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { signInWithGoogle, signOut } from "@/lib/auth";
+import { getMyTeams } from "@/lib/storage";
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 export default function Navbar() {
@@ -13,6 +14,7 @@ export default function Navbar() {
   const [dark, setDark] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [warroomCount, setWarroomCount] = useState(0);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
@@ -21,14 +23,20 @@ export default function Navbar() {
       setDark(true);
     }
 
-    // 초기 세션 확인
     supabase.auth.getSession().then((res: { data: { session: Session | null } }) => {
       setUser(res.data.session?.user ?? null);
+      if (res.data.session?.user) {
+        getMyTeams().then((teams) => setWarroomCount(teams.length));
+      }
     });
 
-    // 세션 변경 감지
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       setUser(session?.user ?? null);
+      if (session?.user) {
+        getMyTeams().then((teams) => setWarroomCount(teams.length));
+      } else {
+        setWarroomCount(0);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -54,6 +62,7 @@ export default function Navbar() {
   ];
 
   const avatarLetter = user?.email?.[0]?.toUpperCase() ?? "U";
+  const warroomActive = pathname.startsWith("/warroom");
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-sm">
@@ -82,6 +91,24 @@ export default function Navbar() {
               </Link>
             );
           })}
+
+          {/* 작전실 버튼 */}
+          <Link
+            href="/warroom"
+            className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${
+              warroomActive
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "bg-primary/10 text-primary hover:bg-primary/20"
+            }`}
+          >
+            <Shield size={13} />
+            작전실
+            {user && warroomCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                {warroomCount}
+              </span>
+            )}
+          </Link>
         </nav>
 
         {/* Right */}

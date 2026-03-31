@@ -6,12 +6,19 @@ import Link from "next/link";
 import {
   getTeamByCode, getHackathonDetail, getWarroomTasks, addWarroomTask,
   updateWarroomTask, deleteWarroomTask, getWarroomChats, addWarroomChat,
-  getWarroomDoc, upsertWarroomDoc, getWarroomSubmissions, upsertWarroomSubmission,
+  getWarroomSubmissions, upsertWarroomSubmission,
+  getWarroomFiles, addWarroomFile, deleteWarroomFile,
+  getRecruitPost, upsertRecruitPost,
+  getApplicants, updateApplicantStatus, incrementTeamMemberCount, transitionToTeamParticipation,
+  getProfileInfo, getProfilePortfolios, getProfileFeedbacks, getProfileMedals,
+  getHackathons, updateTeamHackathon, updateTeamOpen,
+  sendTeamInvitation, getTeamInvitations, getTeamMembers, updateTeamRecruitInfo,
 } from "@/lib/storage";
+import type { TeamMember } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
-import type { Team, HackathonDetail, WarroomTask, WarroomChat, WarroomDoc, WarroomSubmission } from "@/lib/types";
+import type { Team, Hackathon, HackathonDetail, WarroomTask, WarroomChat, WarroomSubmission, WarroomFile, RecruitPost, Applicant, ProfileInfo, ProfilePortfolio, ProfileFeedback, ProfileMedals, HackathonMedal, CommunityMedal, TeamInvitation } from "@/lib/types";
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
-import { ArrowLeft, Plus, Trash2, Send, Eye, Edit3, CheckCircle2, Circle, X } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Send, CheckCircle2, Circle, X, Upload, Check, Users, Github, Linkedin, Mail } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +49,215 @@ const PRIORITY_COLOR: Record<string, string> = {
   low: "text-muted-foreground bg-muted",
 };
 const STATUS_LABEL: Record<string, string> = { todo: "할 일", inprogress: "진행 중", done: "완료" };
+
+// ─── Applicant Profile Modal ──────────────────────────────────────────────────
+
+const MEDAL_STYLES: Record<HackathonMedal, { bg: string; color: string }> = {
+  Novice:  { bg: "#F5F5F5", color: "#666" },
+  Bronze:  { bg: "#FAECE7", color: "#712B13" },
+  Silver:  { bg: "#F1EFE8", color: "#444441" },
+  Gold:    { bg: "#FAEEDA", color: "#633806" },
+  Master:  { bg: "#EEEDFE", color: "#3C3489" },
+};
+const COMMUNITY_STYLES: Record<CommunityMedal, { bg: string; color: string }> = {
+  None:        { bg: "#F5F5F5", color: "#666" },
+  Contributor: { bg: "#EEEDFE", color: "#3C3489" },
+  Expert:      { bg: "#DDD9FC", color: "#2D288A" },
+  Legend:      { bg: "#C9C3FB", color: "#1E1960" },
+};
+
+function ApplicantProfileModal({ applicantId, applicantEmail, onClose }: {
+  applicantId: string;
+  applicantEmail: string;
+  onClose: () => void;
+}) {
+  const [profile, setProfile] = useState<ProfileInfo | null>(null);
+  const [portfolios, setPortfolios] = useState<ProfilePortfolio[]>([]);
+  const [feedbacks, setFeedbacks] = useState<ProfileFeedback[]>([]);
+  const [medals, setMedals] = useState<ProfileMedals | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const [pi, pm, pp, pf] = await Promise.all([
+        getProfileInfo(applicantId),
+        getProfileMedals(applicantId),
+        getProfilePortfolios(applicantId),
+        getProfileFeedbacks(applicantId),
+      ]);
+      setProfile(pi);
+      if (pm) setMedals(pm);
+      setPortfolios(pp);
+      setFeedbacks(pf);
+      setLoading(false);
+    }
+    load();
+  }, [applicantId]);
+
+  const initials = (profile?.nickname ?? applicantEmail)[0]?.toUpperCase() ?? "?";
+  const hStyle = medals?.hackathon_medal ? MEDAL_STYLES[medals.hackathon_medal] : MEDAL_STYLES.Novice;
+  const cStyle = medals?.community_medal ? COMMUNITY_STYLES[medals.community_medal] : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-2xl bg-background rounded-2xl border border-border shadow-2xl flex flex-col"
+        style={{ maxHeight: "min(90vh, 800px)" }}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+          <h2 className="text-base font-bold">지원자 프로필</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-muted">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 px-6 py-5">
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : !profile ? (
+            <div className="text-center py-20 space-y-3">
+              <p className="text-4xl">🔍</p>
+              <p className="text-base font-semibold text-foreground">프로필 없음</p>
+              <p className="text-sm text-muted-foreground">{applicantEmail}</p>
+              <p className="text-sm text-muted-foreground">아직 프로필을 등록하지 않은 사용자입니다.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+
+              {/* 프로필 헤더 */}
+              <div className="flex items-start gap-5 pb-5 border-b border-border">
+                {profile.avatar_url ? (
+                  <img src={profile.avatar_url} alt={profile.nickname} className="w-16 h-16 rounded-full object-cover shrink-0" />
+                ) : (
+                  <span className="w-16 h-16 rounded-full bg-primary text-primary-foreground text-xl font-bold flex items-center justify-center shrink-0">
+                    {initials}
+                  </span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-lg font-bold text-foreground leading-tight">{profile.nickname}</p>
+                  <p className="text-sm text-muted-foreground mb-1">@{profile.nickname.toLowerCase().replace(/\s/g, "")}</p>
+                  {profile.bio && (
+                    <p className="text-sm text-muted-foreground leading-relaxed">{profile.bio}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {medals?.hackathon_medal && (
+                      <span style={{ background: hStyle.bg, color: hStyle.color }} className="text-xs px-2.5 py-0.5 rounded-full font-medium">{medals.hackathon_medal}</span>
+                    )}
+                    {medals?.community_medal && medals.community_medal !== "None" && cStyle && (
+                      <span style={{ background: cStyle.bg, color: cStyle.color }} className="text-xs px-2.5 py-0.5 rounded-full font-medium">{medals.community_medal}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 shrink-0">
+                  {profile.github_url && (
+                    <a href={profile.github_url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                      <Github size={13} /> GitHub
+                    </a>
+                  )}
+                  {profile.linkedin_url && (
+                    <a href={profile.linkedin_url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                      <Linkedin size={13} /> LinkedIn
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* 직무 & 스킬 */}
+              {(profile.roles?.length > 0 || profile.skills?.length > 0) && (
+                <div className="space-y-3">
+                  {profile.roles?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">직무</p>
+                      <div className="flex flex-wrap gap-2">
+                        {profile.roles.map((r) => (
+                          <span key={r} className="text-sm px-3 py-1 rounded-lg font-medium" style={{ background: "#E6F1FB", color: "#185FA5" }}>{r}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {profile.skills?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">스킬</p>
+                      <div className="flex flex-wrap gap-2">
+                        {profile.skills.map((s) => (
+                          <span key={s} className="text-sm px-3 py-1 rounded-lg border border-border text-muted-foreground">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 포트폴리오 */}
+              {portfolios.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">포트폴리오 ({portfolios.length})</p>
+                  <div className="space-y-3">
+                    {portfolios.map((p) => (
+                      <div key={p.id} className="rounded-xl border border-border p-4">
+                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                          <p className="text-sm font-semibold text-foreground leading-snug">{p.title}</p>
+                          {p.demo_url && (
+                            <a href={p.demo_url} target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-primary hover:underline shrink-0">데모 →</a>
+                          )}
+                        </div>
+                        {p.summary && (
+                          <p className="text-sm text-muted-foreground leading-relaxed mb-2">{p.summary}</p>
+                        )}
+                        {p.tech_tags?.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {p.tech_tags.map((t) => (
+                              <span key={t} className="text-xs px-2 py-0.5 rounded-md bg-muted text-muted-foreground">{t}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 팀원 피드백 */}
+              {feedbacks.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">팀원 피드백 ({feedbacks.length})</p>
+                  <div className="space-y-3">
+                    {feedbacks.map((f) => (
+                      <div key={f.id} className="rounded-xl border border-border p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center shrink-0">
+                            {f.reviewer_nickname[0]?.toUpperCase()}
+                          </span>
+                          <span className="text-sm font-medium text-foreground">{f.reviewer_nickname}</span>
+                          <span className="text-yellow-400 text-sm">{"★".repeat(f.rating)}{"☆".repeat(5 - f.rating)}</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground leading-relaxed">{f.content}</p>
+                        <p className="text-xs text-muted-foreground mt-1.5">
+                          {f.team_name} · {new Date(f.created_at).toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit" })}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {portfolios.length === 0 && feedbacks.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">등록된 포트폴리오나 피드백이 없습니다.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Task Modal ───────────────────────────────────────────────────────────────
 
@@ -275,37 +491,71 @@ function WarroomContent() {
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const [doc, setDoc] = useState<WarroomDoc | null>(null);
-  const [docContent, setDocContent] = useState("");
-  const [docPreview, setDocPreview] = useState(false);
-  const [docSaved, setDocSaved] = useState(true);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [wSubmissions, setWSubmissions] = useState<WarroomSubmission[]>([]);
   const [subUrls, setSubUrls] = useState<Record<string, string>>({});
 
+  // Files
+  const [files, setFiles] = useState<WarroomFile[]>([]);
+  const [fileUploading, setFileUploading] = useState(false);
+  const [fileDragOver, setFileDragOver] = useState(false);
+
+  // Recruit
+  const [recruitPost, setRecruitPost] = useState<RecruitPost | null>(null);
+  const [recruitForm, setRecruitForm] = useState({ positions: [] as string[], description: "", contactUrl: "", requirements: "", isOpen: true });
+  const [recruitPositionInput, setRecruitPositionInput] = useState("");
+  const [recruitSaving, setRecruitSaving] = useState(false);
+
+  // Team / Applicants
+  const [applicants, setApplicants] = useState<Applicant[]>([]);
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [profileModal, setProfileModal] = useState<{ id: string; email: string } | null>(null);
+
+  // Invitations
+  const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+
+  // Settings
+  const [allHackathons, setAllHackathons] = useState<Hackathon[]>([]);
+  const [settingHackathonSlug, setSettingHackathonSlug] = useState("");
+  const [settingSaving, setSettingSaving] = useState(false);
+  const [settingSaved, setSettingSaved] = useState(false);
+  const [isCreator, setIsCreator] = useState(false);
+
   useEffect(() => {
     supabase.auth.getSession().then((res: { data: { session: Session | null } }) => {
-      setUser(res.data.session?.user ?? null);
+      if (!res.data.session?.user) { router.replace("/warroom"); return; }
+      setUser(res.data.session.user);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e: AuthChangeEvent, session: Session | null) => {
-      setUser(session?.user ?? null);
+      if (!session?.user) { router.replace("/warroom"); return; }
+      setUser(session.user);
     });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     async function load() {
       try {
-        const result = await getTeamByCode(teamCode);
+        const [result, hackathons] = await Promise.all([
+          getTeamByCode(teamCode),
+          getHackathons(),
+        ]);
         if (!result) { setStatus("error"); return; }
         setTeam(result.team);
-        const [d, t] = await Promise.all([
-          getHackathonDetail(result.team.hackathonSlug),
+        setAllHackathons(hackathons);
+        setSettingHackathonSlug(result.team.hackathonSlug ?? "");
+        const { data: { session: sess } } = await supabase.auth.getSession();
+        setIsCreator(!!sess?.user && result.creatorId === sess.user.id);
+        const [d, t, mems] = await Promise.all([
+          result.team.hackathonSlug ? getHackathonDetail(result.team.hackathonSlug) : Promise.resolve(null),
           getWarroomTasks(teamCode),
+          getTeamMembers(teamCode),
         ]);
         setDetail(d);
         setTasks(t);
+        setMembers(mems);
         setStatus("loaded");
       } catch {
         setStatus("error");
@@ -317,11 +567,6 @@ function WarroomContent() {
   useEffect(() => {
     if (activeTab === "chat") {
       getWarroomChats(teamCode).then(setChats);
-    } else if (activeTab === "docs") {
-      getWarroomDoc(teamCode).then((d) => {
-        setDoc(d);
-        setDocContent(d?.content ?? "");
-      });
     } else if (activeTab === "submit") {
       getWarroomSubmissions(teamCode).then((subs) => {
         setWSubmissions(subs);
@@ -329,8 +574,33 @@ function WarroomContent() {
         subs.forEach((s) => { if (s.url) urls[s.deadlineKey] = s.url; });
         setSubUrls(urls);
       });
+    } else if (activeTab === "files") {
+      getWarroomFiles(teamCode).then(setFiles);
+    } else if (activeTab === "recruit") {
+      getRecruitPost(teamCode).then((post) => {
+        setRecruitPost(post);
+        // positions/description/contactUrl은 항상 team 데이터 기준
+        // requirements/isOpen만 공고 저장값 사용
+        setRecruitForm({
+          positions: team?.lookingFor ?? [],
+          description: team?.intro ?? "",
+          contactUrl: team?.contact?.url ?? "",
+          requirements: post?.requirements ?? "",
+          isOpen: post?.isOpen ?? true,
+        });
+      });
+    } else if (activeTab === "team") {
+      Promise.all([
+        getApplicants(teamCode),
+        getTeamInvitations(teamCode),
+        getTeamMembers(teamCode),
+      ]).then(([apps, invs, mems]) => {
+        setApplicants(apps);
+        setInvitations(invs);
+        setMembers(mems);
+      });
     }
-  }, [activeTab, teamCode]);
+  }, [activeTab, teamCode, team]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -380,18 +650,6 @@ function WarroomContent() {
     setChats(updated);
   }
 
-  // ─── Docs handlers ──────────────────────────────────────────────────────────
-
-  const handleDocChange = useCallback((value: string) => {
-    setDocContent(value);
-    setDocSaved(false);
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      await upsertWarroomDoc(teamCode, value, user?.email ?? "");
-      setDocSaved(true);
-    }, 1000);
-  }, [teamCode, user]);
-
   // ─── Submit handlers ─────────────────────────────────────────────────────────
 
   async function handleSubmit(deadlineKey: string) {
@@ -412,12 +670,153 @@ function WarroomContent() {
     );
   }
 
+  // ─── File handlers ───────────────────────────────────────────────────────────
+
+  async function handleFileUpload(file: File) {
+    if (!user) return;
+    const allowed = ["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "application/zip"];
+    if (!allowed.includes(file.type)) { alert("PDF, 이미지, ZIP 파일만 업로드 가능합니다."); return; }
+    if (file.size > 50 * 1024 * 1024) { alert("파일 크기는 50MB를 초과할 수 없습니다."); return; }
+    setFileUploading(true);
+    try {
+      const path = `${teamCode}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage.from("team-files").upload(path, file);
+      let fileUrl = "";
+      if (uploadError) {
+        // Storage not configured: use object URL as fallback for demo
+        fileUrl = URL.createObjectURL(file);
+      } else {
+        const { data: { publicUrl } } = supabase.storage.from("team-files").getPublicUrl(path);
+        fileUrl = publicUrl;
+      }
+      await addWarroomFile({
+        teamCode,
+        fileName: file.name,
+        fileUrl,
+        storagePath: path,
+        fileType: file.type,
+        fileSize: file.size,
+        uploaderId: user.id,
+        uploaderEmail: user.email ?? "",
+      });
+      const updated = await getWarroomFiles(teamCode);
+      setFiles(updated);
+    } catch {
+      alert("파일 업로드 중 오류가 발생했습니다.");
+    } finally {
+      setFileUploading(false);
+    }
+  }
+
+  async function handleDeleteFile(file: WarroomFile) {
+    if (!confirm(`"${file.fileName}" 파일을 삭제할까요?`)) return;
+    await deleteWarroomFile(file.id, file.storagePath);
+    setFiles((prev) => prev.filter((f) => f.id !== file.id));
+  }
+
+  // ─── Recruit handlers ─────────────────────────────────────────────────────────
+
+  async function handleSaveRecruitPost() {
+    // 기존 글 있으면 토글만 변경도 저장 허용, 신규 등록은 필수 필드 체크
+    if (!recruitPost && (!recruitForm.description.trim() || !recruitForm.contactUrl.trim())) return;
+    setRecruitSaving(true);
+    try {
+      await upsertRecruitPost({ teamCode, ...recruitForm });
+      await updateTeamOpen(teamCode, recruitForm.isOpen);
+      const [updated, updatedTeam] = await Promise.all([
+        getRecruitPost(teamCode),
+        updateTeamRecruitInfo(teamCode, recruitForm.positions, recruitForm.description, recruitForm.contactUrl),
+      ]);
+      setRecruitPost(updated);
+      if (updatedTeam) setTeam(updatedTeam);
+    } finally {
+      setRecruitSaving(false);
+    }
+  }
+
+  // ─── Applicant handlers ───────────────────────────────────────────────────────
+
+  async function handleApplicant(applicant: Applicant, action: "accepted" | "rejected") {
+    await updateApplicantStatus(applicant.id, action);
+    setApplicants((prev) => prev.map((a) => a.id === applicant.id ? { ...a, status: action } : a));
+    if (action === "accepted") {
+      const updatedTeam = await incrementTeamMemberCount(applicant.teamCode);
+      if (updatedTeam) setTeam(updatedTeam);
+      // 수락된 멤버의 해커톤 참여 상태를 팀 참여로 전환
+      if (team?.hackathonSlug) {
+        try {
+          await transitionToTeamParticipation(
+            applicant.applicantId,
+            team.hackathonSlug,
+            applicant.teamCode,
+          );
+        } catch (e) {
+          console.warn("participation transition failed", e);
+        }
+      }
+      const mems = await getTeamMembers(applicant.teamCode);
+      setMembers(mems);
+    }
+  }
+
+  async function handleSendInvite() {
+    if (!inviteEmail.trim() || !team) return;
+    setInviteSending(true);
+    setInviteError("");
+    try {
+      await sendTeamInvitation(teamCode, team.name, inviteEmail.trim().toLowerCase());
+      const updated = await getTeamInvitations(teamCode);
+      setInvitations(updated);
+      setInviteEmail("");
+    } catch (e) {
+      setInviteError(e instanceof Error ? e.message : "초대장 전송에 실패했습니다");
+    } finally {
+      setInviteSending(false);
+    }
+  }
+
+  async function handleSaveHackathon() {
+    if (!settingHackathonSlug || !team) return;
+    setSettingSaving(true);
+    try {
+      await updateTeamHackathon(teamCode, settingHackathonSlug);
+      const [updatedResult, d] = await Promise.all([
+        getTeamByCode(teamCode),
+        getHackathonDetail(settingHackathonSlug),
+      ]);
+      if (updatedResult) setTeam(updatedResult.team);
+      setDetail(d);
+      // 해커톤 마일스톤 기반 기본 태스크 생성
+      const milestones = d?.sections.schedule.milestones ?? [];
+      if (milestones.length > 0 && tasks.length === 0) {
+        const defaultTasks = [
+          { title: "기획서 작성", milestone: milestones.find((m) => m.name.includes("기획서")) },
+          { title: "산출물 개발", milestone: milestones.find((m) => m.name.includes("웹링크") || m.name.includes("제출 마감")) },
+          { title: "최종 제출", milestone: milestones[milestones.length - 1] },
+        ];
+        await Promise.all(defaultTasks.map((t) =>
+          addWarroomTask({ teamCode, title: t.title, status: "todo", priority: "medium", dueDate: t.milestone?.at })
+        ));
+        const updatedTasks = await getWarroomTasks(teamCode);
+        setTasks(updatedTasks);
+      }
+      setSettingSaved(true);
+      setTimeout(() => setSettingSaved(false), 2000);
+    } catch {
+      // ignore
+    } finally {
+      setSettingSaving(false);
+    }
+  }
+
   // ─── Derived ────────────────────────────────────────────────────────────────
 
   const upcomingMilestones = detail?.sections.schedule.milestones.filter(
     (m) => getDDay(m.at) >= -1,
   ) ?? [];
-  const teamMembers = user?.email ? [user.email] : [];
+  const teamMembers = members.length > 0
+    ? members.map((m) => m.nickname || m.email.split("@")[0])
+    : user?.email ? [user.email.split("@")[0]] : [];
   const submissionItems = detail?.sections.submit.submissionItems ?? [];
   const setTab = (tab: string) => router.push(`/warroom/${teamCode}?tab=${tab}`);
 
@@ -434,11 +833,16 @@ function WarroomContent() {
     return <div className="flex items-center justify-center min-h-[40vh] text-destructive">팀 정보를 불러올 수 없습니다.</div>;
   }
 
+  const pendingApplicantCount = applicants.filter((a) => a.status === "pending").length;
+
   const tabs = [
     { key: "tasks", label: "태스크 보드" },
     { key: "chat", label: "채팅" },
-    { key: "docs", label: "공유 문서" },
+    { key: "files", label: "파일함" },
+    { key: "recruit", label: "팀원 모집" },
+    { key: "team", label: `팀 구성${pendingApplicantCount > 0 ? ` (${pendingApplicantCount})` : ""}` },
     { key: "submit", label: "제출 허브" },
+    { key: "settings", label: "설정" },
   ];
 
   const columns: { status: WarroomTask["status"]; label: string; headerBg: string }[] = [
@@ -457,6 +861,15 @@ function WarroomContent() {
           onSave={handleSaveTask}
           onDelete={modalTaskId !== "new" ? handleDeleteTask : undefined}
           onClose={() => setModalTaskId(null)}
+        />
+      )}
+
+      {/* Applicant Profile Modal */}
+      {profileModal && (
+        <ApplicantProfileModal
+          applicantId={profileModal.id}
+          applicantEmail={profileModal.email}
+          onClose={() => setProfileModal(null)}
         />
       )}
 
@@ -546,15 +959,6 @@ function WarroomContent() {
             {activeTab === "chat" && (
               <div className="flex flex-col h-[calc(100vh-220px)]">
                 <h2 className="text-lg font-bold mb-4">팀 채팅</h2>
-                {team.contact?.url && (
-                  <div className="mb-3 rounded-lg border border-border bg-muted/40 p-3 flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">팀 오픈카톡</span>
-                    <a href={team.contact.url} target="_blank" rel="noreferrer"
-                      className="text-xs text-primary font-medium hover:underline">
-                      카카오톡 채팅방 열기 →
-                    </a>
-                  </div>
-                )}
                 <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card p-4 space-y-3 mb-4">
                   {chats.length === 0 ? (
                     <p className="text-center text-sm text-muted-foreground py-8">아직 메시지가 없습니다.</p>
@@ -564,9 +968,19 @@ function WarroomContent() {
                         <span className="text-xs text-muted-foreground bg-muted px-3 py-1 rounded-full">{msg.content}</span>
                       ) : (
                         <div className={`flex gap-3 ${msg.userEmail === user?.email ? "flex-row-reverse" : ""}`}>
-                          <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center shrink-0">
-                            {msg.userEmail[0]?.toUpperCase()}
-                          </span>
+                          {msg.userEmail !== user?.email ? (
+                            <button
+                              title={msg.userEmail}
+                              onClick={() => window.open(`/user/${encodeURIComponent(msg.userEmail)}`, "_blank")}
+                              className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                            >
+                              {msg.userEmail[0]?.toUpperCase()}
+                            </button>
+                          ) : (
+                            <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center shrink-0">
+                              {msg.userEmail[0]?.toUpperCase()}
+                            </span>
+                          )}
                           <div className={`flex flex-col gap-0.5 max-w-[70%] ${msg.userEmail === user?.email ? "items-end" : ""}`}>
                             <span className="text-[10px] text-muted-foreground">{msg.userEmail.split("@")[0]}</span>
                             <span className={`text-sm rounded-xl px-3 py-2 ${
@@ -601,45 +1015,361 @@ function WarroomContent() {
               </div>
             )}
 
-            {/* ── Docs Tab ── */}
-            {activeTab === "docs" && (
+            {/* ── Files Tab ── */}
+            {activeTab === "files" && (
+              <div>
+                <h2 className="text-lg font-bold mb-4">파일함</h2>
+
+                {/* Upload Area */}
+                <div
+                  className={`rounded-xl border-2 border-dashed p-8 text-center transition-colors mb-6 ${
+                    fileDragOver ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setFileDragOver(true); }}
+                  onDragLeave={() => setFileDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setFileDragOver(false);
+                    const f = e.dataTransfer.files[0];
+                    if (f) handleFileUpload(f);
+                  }}
+                >
+                  <Upload size={24} className="mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground mb-1">
+                    파일을 여기에 드래그하거나 클릭해서 업로드
+                  </p>
+                  <p className="text-xs text-muted-foreground">PDF, 이미지, ZIP · 최대 50MB</p>
+                  <label className={`mt-3 inline-block cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                    user ? "bg-primary text-primary-foreground hover:opacity-90" : "bg-muted text-muted-foreground cursor-not-allowed"
+                  }`}>
+                    {fileUploading ? "업로드 중..." : "파일 선택"}
+                    {user && !fileUploading && (
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".pdf,image/*,.zip"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ""; }}
+                      />
+                    )}
+                  </label>
+                  {!user && <p className="text-xs text-muted-foreground mt-2">업로드하려면 로그인이 필요합니다.</p>}
+                </div>
+
+                {/* File List */}
+                {files.length === 0 ? (
+                  <p className="text-center text-sm text-muted-foreground py-8">업로드된 파일이 없습니다.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {files.map((f) => {
+                      const isPdf = f.fileType === "application/pdf";
+                      const isImage = f.fileType?.startsWith("image/");
+                      const sizeStr = f.fileSize
+                        ? f.fileSize > 1024 * 1024
+                          ? `${(f.fileSize / 1024 / 1024).toFixed(1)}MB`
+                          : `${(f.fileSize / 1024).toFixed(0)}KB`
+                        : "";
+                      return (
+                        <div key={f.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
+                          <span className="text-2xl shrink-0">
+                            {isPdf ? "📄" : isImage ? "🖼️" : "📦"}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{f.fileName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {f.uploaderEmail.split("@")[0]} · {new Date(f.createdAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                              {sizeStr && ` · ${sizeStr}`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {(isPdf || isImage) ? (
+                              <a href={f.fileUrl} target="_blank" rel="noreferrer"
+                                className="text-xs text-primary hover:underline font-medium">
+                                {isPdf ? "뷰어로 열기" : "이미지 보기"}
+                              </a>
+                            ) : (
+                              <a href={f.fileUrl} download={f.fileName}
+                                className="text-xs text-primary hover:underline font-medium">
+                                다운로드
+                              </a>
+                            )}
+                            {user?.email === f.uploaderEmail && (
+                              <button
+                                onClick={() => handleDeleteFile(f)}
+                                className="text-destructive hover:text-destructive/80 ml-1"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Recruit Tab ── */}
+            {activeTab === "recruit" && (
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-bold">공유 문서</h2>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-muted-foreground">{docSaved ? "저장됨" : "저장 중..."}</span>
-                    <button
-                      onClick={() => setDocPreview(!docPreview)}
-                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded-md px-2.5 py-1.5"
-                    >
-                      {docPreview ? <Edit3 size={12} /> : <Eye size={12} />}
-                      {docPreview ? "편집" : "미리보기"}
-                    </button>
-                  </div>
+                  <h2 className="text-lg font-bold">팀원 모집</h2>
+                  {recruitPost && (
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                      recruitPost.isOpen
+                        ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
+                        : "bg-muted text-muted-foreground"
+                    }`}>
+                      {recruitPost.isOpen ? "모집 중" : "모집 완료"}
+                    </span>
+                  )}
                 </div>
-                {doc?.lastEditedBy && (
-                  <p className="text-xs text-muted-foreground mb-3">
-                    마지막 수정: {doc.lastEditedBy.split("@")[0]} ({new Date(doc.lastEditedAt).toLocaleString("ko-KR")})
-                  </p>
-                )}
-                {docPreview ? (
-                  <div className="rounded-xl border border-border bg-card p-6 min-h-[400px]">
-                    <pre className="whitespace-pre-wrap font-sans text-sm">{docContent || "내용이 없습니다."}</pre>
+
+                <div className="space-y-5 rounded-xl border border-border bg-card p-5">
+                  {/* 모집 상태 */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium shrink-0">모집 상태</span>
+                    <button
+                      type="button"
+                      onClick={() => setRecruitForm((v) => ({ ...v, isOpen: !v.isOpen }))}
+                      className={`relative inline-flex shrink-0 items-center w-10 h-5 rounded-full overflow-hidden transition-colors focus:outline-none ${recruitForm.isOpen ? "bg-primary" : "bg-border"}`}
+                    >
+                      <span className={`inline-block w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${recruitForm.isOpen ? "translate-x-5" : "translate-x-0.5"}`} />
+                    </button>
+                    <span className={`text-sm font-medium shrink-0 ${recruitForm.isOpen ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>
+                      {recruitForm.isOpen ? "모집 중" : "모집 완료"}
+                    </span>
                   </div>
-                ) : (
-                  <textarea
-                    value={docContent}
-                    onChange={(e) => handleDocChange(e.target.value)}
-                    placeholder={"# 기획서 제목\n\n여기에 팀 문서를 작성하세요..."}
-                    className="w-full rounded-xl border border-border bg-card p-6 text-sm font-mono min-h-[400px] resize-y focus:outline-none focus:ring-2 focus:ring-ring"
-                    disabled={!user}
-                  />
-                )}
-                {submissionItems.length > 0 && (
-                  <button onClick={() => setTab("submit")} className="mt-3 text-xs text-primary hover:underline">
-                    기획서로 제출하기 → 제출 허브로 이동
+
+                  {/* 포지션 */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                      모집 포지션 *
+                    </label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {recruitForm.positions.map((p) => (
+                        <span key={p} className="flex items-center gap-1 text-xs bg-primary/10 text-primary px-2.5 py-1 rounded-full">
+                          {p}
+                          <button onClick={() => setRecruitForm((v) => ({ ...v, positions: v.positions.filter((x) => x !== p) }))}>
+                            <X size={11} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        value={recruitPositionInput}
+                        onChange={(e) => setRecruitPositionInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && recruitPositionInput.trim()) {
+                            setRecruitForm((v) => ({ ...v, positions: [...v.positions, recruitPositionInput.trim()] }));
+                            setRecruitPositionInput("");
+                          }
+                        }}
+                        placeholder="예: Backend Developer"
+                        className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <button
+                        onClick={() => {
+                          if (recruitPositionInput.trim()) {
+                            setRecruitForm((v) => ({ ...v, positions: [...v.positions, recruitPositionInput.trim()] }));
+                            setRecruitPositionInput("");
+                          }
+                        }}
+                        className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 팀 소개 */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                      팀 소개 *
+                    </label>
+                    <textarea
+                      value={recruitForm.description}
+                      onChange={(e) => setRecruitForm((v) => ({ ...v, description: e.target.value }))}
+                      placeholder="팀을 소개해주세요..."
+                      rows={4}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                    />
+                  </div>
+
+                  {/* 연락 링크 */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                      연락 링크 *
+                    </label>
+                    <input
+                      value={recruitForm.contactUrl}
+                      onChange={(e) => setRecruitForm((v) => ({ ...v, contactUrl: e.target.value }))}
+                      placeholder="https://open.kakao.com/..."
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+
+                  {/* 우대 조건 */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                      우대 조건 (선택)
+                    </label>
+                    <textarea
+                      value={recruitForm.requirements}
+                      onChange={(e) => setRecruitForm((v) => ({ ...v, requirements: e.target.value }))}
+                      placeholder="우대 조건을 입력하세요..."
+                      rows={2}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleSaveRecruitPost}
+                    disabled={
+                      recruitSaving || !user ||
+                      (!recruitPost && (!recruitForm.description.trim() || !recruitForm.contactUrl.trim()))
+                    }
+                    className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    {recruitSaving ? "저장 중..." : recruitPost ? "저장" : "저장 & 공개"}
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Team Tab ── */}
+            {activeTab === "team" && (
+              <div className="space-y-6">
+                {/* 초대장 보내기 */}
+                {isCreator && (
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <Mail size={14} className="text-primary" /> 이메일로 초대장 보내기
+                    </h3>
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => { setInviteEmail(e.target.value); setInviteError(""); }}
+                        onKeyDown={(e) => e.key === "Enter" && handleSendInvite()}
+                        placeholder="초대할 사람의 이메일 주소"
+                        className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        disabled={inviteSending}
+                      />
+                      <button
+                        onClick={handleSendInvite}
+                        disabled={!inviteEmail.trim() || inviteSending}
+                        className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 shrink-0"
+                      >
+                        {inviteSending ? "전송 중..." : "초대"}
+                      </button>
+                    </div>
+                    {inviteError && <p className="text-xs text-destructive mt-2">{inviteError}</p>}
+                  </div>
                 )}
+
+                {/* 보낸 초대장 목록 */}
+                {invitations.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold mb-3 text-muted-foreground">보낸 초대장 ({invitations.length})</h3>
+                    <div className="space-y-2">
+                      {invitations.map((inv) => (
+                        <div key={inv.id} className="rounded-xl border border-border bg-card p-3 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                              <Mail size={14} className="text-muted-foreground" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">{inv.inviteeEmail}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {new Date(inv.createdAt).toLocaleDateString("ko-KR")}
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full shrink-0 ${
+                            inv.status === "accepted"
+                              ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
+                              : inv.status === "rejected"
+                              ? "bg-red-100 text-red-600 dark:bg-red-950/30 dark:text-red-400"
+                              : "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400"
+                          }`}>
+                            {inv.status === "accepted" ? "수락됨" : inv.status === "rejected" ? "거절됨" : "대기 중"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 지원자 목록 */}
+                <div>
+                  <h3 className="text-sm font-semibold mb-3 text-muted-foreground">
+                    지원자 {applicants.length}명
+                  </h3>
+                  {applicants.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3 py-12 text-center rounded-xl border border-border bg-card">
+                      <Users size={36} className="text-muted-foreground opacity-40" />
+                      <p className="text-sm text-muted-foreground">아직 지원자가 없습니다</p>
+                      <p className="text-xs text-muted-foreground">팀원 모집 탭에서 공고를 올리면 지원자가 생깁니다.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {applicants.map((a) => (
+                        <div
+                          key={a.id}
+                          className={`rounded-xl border border-border bg-card p-4 flex items-start gap-4 ${a.status === "rejected" ? "opacity-60" : ""}`}
+                        >
+                          <button
+                            onClick={() => setProfileModal({ id: a.applicantId, email: a.applicantEmail })}
+                            className="w-10 h-10 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shrink-0 hover:opacity-80 transition-opacity"
+                          >
+                            {a.applicantEmail[0]?.toUpperCase()}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <button
+                              onClick={() => setProfileModal({ id: a.applicantId, email: a.applicantEmail })}
+                              className="font-semibold text-sm hover:underline text-left"
+                            >
+                              {a.applicantEmail.split("@")[0]}
+                            </button>
+                            {a.position && <p className="text-xs text-muted-foreground mt-0.5">지원 포지션: {a.position}</p>}
+                            {a.message && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{a.message}</p>}
+                            <p className="text-[11px] text-muted-foreground mt-1">
+                              {new Date(a.createdAt).toLocaleDateString("ko-KR")}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {a.status === "pending" ? (
+                              <>
+                                <button
+                                  onClick={() => handleApplicant(a, "accepted")}
+                                  className="flex items-center gap-1 text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-lg hover:opacity-90 font-medium"
+                                >
+                                  <Check size={12} /> 수락
+                                </button>
+                                <button
+                                  onClick={() => handleApplicant(a, "rejected")}
+                                  className="flex items-center gap-1 text-xs border border-border text-muted-foreground px-3 py-1.5 rounded-lg hover:bg-muted font-medium"
+                                >
+                                  <X size={12} /> 거절
+                                </button>
+                              </>
+                            ) : (
+                              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                a.status === "accepted"
+                                  ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
+                                  : "bg-muted text-muted-foreground"
+                              }`}>
+                                {a.status === "accepted" ? "수락됨" : "거절됨"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -647,7 +1377,12 @@ function WarroomContent() {
             {activeTab === "submit" && (
               <div>
                 <h2 className="text-lg font-bold mb-4">제출 허브</h2>
-                {submissionItems.length === 0 ? (
+                {!team.hackathonSlug ? (
+                  <div className="text-center py-12 text-muted-foreground text-sm">
+                    <p className="mb-2">연결된 해커톤이 없습니다.</p>
+                    <button onClick={() => router.push(`/warroom/${teamCode}?tab=settings`)} className="text-primary underline text-sm">설정에서 해커톤 연결하기</button>
+                  </div>
+                ) : submissionItems.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground text-sm">이 해커톤에는 등록된 제출 항목이 없습니다.</div>
                 ) : (
                   <div className="space-y-4">
@@ -711,6 +1446,101 @@ function WarroomContent() {
                 )}
               </div>
             )}
+
+            {/* ── Settings Tab ── */}
+            {activeTab === "settings" && (
+              <div className="space-y-6 max-w-lg">
+                <h2 className="text-lg font-bold">팀 설정</h2>
+
+                {/* 해커톤 연결 */}
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <h3 className="font-semibold mb-1">해커톤 연결</h3>
+                  {team.hackathonSlug ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 px-3 py-2">
+                        <span className="text-sm font-medium text-blue-700 dark:text-blue-400">
+                          {allHackathons.find((h) => h.slug === team.hackathonSlug)?.title ?? team.hackathonSlug}
+                        </span>
+                      </div>
+                      <Link
+                        href={`/hackathons/${team.hackathonSlug}`}
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        해커톤 페이지로 이동 <ArrowLeft size={11} className="rotate-180" />
+                      </Link>
+                      {isCreator && (
+                        <div className="pt-2 border-t border-border">
+                          <p className="text-xs text-muted-foreground mb-2">해커톤 변경</p>
+                          <div className="flex gap-2">
+                            <select
+                              value={settingHackathonSlug}
+                              onChange={(e) => setSettingHackathonSlug(e.target.value)}
+                              className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                            >
+                              <option value="">선택하세요</option>
+                              {allHackathons.map((h) => (
+                                <option key={h.slug} value={h.slug}>{h.title}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={handleSaveHackathon}
+                              disabled={settingSaving || !settingHackathonSlug || settingHackathonSlug === team.hackathonSlug}
+                              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 shrink-0"
+                            >
+                              {settingSaving ? "저장중..." : settingSaved ? "저장됨 ✓" : "변경"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : isCreator ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">아직 해커톤이 연결되지 않았습니다. 참가할 해커톤을 선택하세요.</p>
+                      <div className="flex gap-2">
+                        <select
+                          value={settingHackathonSlug}
+                          onChange={(e) => setSettingHackathonSlug(e.target.value)}
+                          className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          <option value="">해커톤 선택</option>
+                          {allHackathons.map((h) => (
+                            <option key={h.slug} value={h.slug}>{h.title}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={handleSaveHackathon}
+                          disabled={settingSaving || !settingHackathonSlug}
+                          className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 shrink-0"
+                        >
+                          {settingSaving ? "저장중..." : settingSaved ? "저장됨 ✓" : "저장"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">아직 해커톤이 연결되지 않았습니다. 팀장에게 문의하세요.</p>
+                  )}
+                </div>
+
+                {/* 팀 기본 정보 */}
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <h3 className="font-semibold mb-3">팀 정보</h3>
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">팀 코드</dt>
+                      <dd className="font-mono text-xs">{team.teamCode}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">멤버 수</dt>
+                      <dd>{team.memberCount}명</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">모집 상태</dt>
+                      <dd>{team.isOpen ? "모집 중" : "마감"}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Sidebar */}
@@ -725,19 +1555,30 @@ function WarroomContent() {
             )}
             <div className="rounded-xl border border-border bg-card p-4">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">팀원</p>
-              {user && (
-                <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center">
-                    {user.email?.[0]?.toUpperCase()}
-                  </span>
-                  <div>
-                    <p className="text-xs font-medium">{user.email?.split("@")[0]}</p>
-                    <p className="text-[10px] text-muted-foreground">팀장</p>
+              <div className="space-y-2">
+                {members.length > 0 ? members.map((m) => (
+                  <div key={m.userId} className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center shrink-0">
+                      {(m.nickname || m.email)?.[0]?.toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{m.nickname || m.email.split("@")[0]}</p>
+                      <p className="text-[10px] text-muted-foreground">{m.role === "creator" ? "팀장" : "팀원"}</p>
+                    </div>
                   </div>
-                  <span className="ml-auto w-2 h-2 rounded-full bg-green-500" />
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground mt-3">총 {team.memberCount}명</p>
+                )) : user ? (
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center">
+                      {user.email?.[0]?.toUpperCase()}
+                    </span>
+                    <div>
+                      <p className="text-xs font-medium">{user.email?.split("@")[0]}</p>
+                      <p className="text-[10px] text-muted-foreground">팀장</p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">총 {members.length > 0 ? members.length : team.memberCount}명</p>
             </div>
             {detail && (
               <div className="rounded-xl border border-border bg-card p-4">

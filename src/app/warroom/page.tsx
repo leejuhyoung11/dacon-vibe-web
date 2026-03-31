@@ -97,7 +97,7 @@ export default function WarroomListPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {teams.map((team) => {
-          const hackathon = hackathonMap[team.hackathonSlug];
+          const hackathon = team.hackathonSlug ? hackathonMap[team.hackathonSlug] : undefined;
           const deadline = hackathon?.period.submissionDeadlineAt;
           const dday = deadline ? getDDay(deadline) : null;
           const isUrgent = dday !== null && dday >= 0 && dday <= 3;
